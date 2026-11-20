@@ -53,6 +53,7 @@
         "pouchdb-merge": "^9.0.0",
         "pouchdb-replication": "^9.0.0",
         "pouchdb-utils": "^9.0.0",
+        "sharp": "^0.35.5",
         "transform-pouch": "^2.0.0",
         "xxhash-wasm": "^1.0.2",
         "zod": "^4.6.7"

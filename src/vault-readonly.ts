@@ -24,6 +24,7 @@ export function readOnlyVault(inner: VaultBackend): VaultBackend {
         listNotes: (folder) => inner.listNotes(folder),
         listNotesWithMtime: (folder) => inner.listNotesWithMtime(folder),
         getAttachmentInfo: (path) => inner.getAttachmentInfo(path),
+        readAttachment: (path, options) => inner.readAttachment(path, options),
         listAttachments: inner.listAttachments?.bind(inner),
         watchChanges: inner.watchChanges?.bind(inner),
         catchUp: inner.catchUp?.bind(inner),

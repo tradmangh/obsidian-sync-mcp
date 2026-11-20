@@ -10,7 +10,7 @@ import { AttachmentTooLargeError, AttachmentMoveIncompleteError } from "./vault-
 type Tool = { name: string; description: string; parameters: any; execute: (args: any) => Promise<string> };
 
 function setup(overrides: Partial<AttachmentToolOptions> = {}) {
-    const { vault, files } = memoryAttachments();
+    const { vault, files, notes } = memoryAttachments();
     const registry = new UploadRegistry();
     const tools: Tool[] = [];
     const server = { addTool: (t: Tool) => tools.push(t) };
@@ -41,7 +41,7 @@ function setup(overrides: Partial<AttachmentToolOptions> = {}) {
         files.set(path, { data: new Uint8Array(size), ctime: 1, mtime });
         searchIndex.updateAttachment(path, size, mtime);
     };
-    return { tools, files, registry, call, embed, put, searchIndex, vault };
+    return { tools, files, notes, registry, call, embed, put, searchIndex, vault };
 }
 
 const b64 = (arr: number[]) => Buffer.from(arr).toString("base64");
@@ -49,9 +49,13 @@ const b64 = (arr: number[]) => Buffer.from(arr).toString("base64");
 describe("attachment tool registration", () => {
     it("registers all tools, and only metadata in read-only mode", () => {
         assert.deepEqual(setup().tools.map((t) => t.name).sort(), [
-            "create_attachment_upload", "delete_attachment", "get_attachment_metadata", "list_attachments", "move_attachment", "write_attachment",
+            "create_attachment_upload", "delete_attachment", "get_attachment_metadata", "list_attachments", "move_attachment", "read_attachment", "write_attachment",
         ]);
-        assert.deepEqual(setup({ readOnly: true }).tools.map((t) => t.name).sort(), ["get_attachment_metadata", "list_attachments"]);
+        assert.deepEqual(setup({ readOnly: true }).tools.map((t) => t.name).sort(), ["get_attachment_metadata", "list_attachments", "read_attachment"]);
+    });
+
+    it("leaves read_attachment out when no image type is allowed", () => {
+        assert.ok(!setup({ allowedExtensions: new Set(["pdf"]) }).tools.some((t) => t.name === "read_attachment"));
     });
 });
 

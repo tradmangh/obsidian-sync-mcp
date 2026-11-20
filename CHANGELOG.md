@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- **`read_attachment`: let the model see images in the vault.** Returns an image attachment as MCP image content, with its size and the notes that embed it. Accepts a full vault path or the bare file name used in an embed (`image 5.jpg` from `![[image 5.jpg]]`), resolved by file name the way Obsidian does; an ambiguous name lists the candidates. Photos are auto-rotated from EXIF and scaled to `max_edge` px on the long side (default 1568, the size vision models work at), re-encoded as JPEG, or PNG for images with transparency and PNG sources; small images in a natively displayable format are sent unchanged. Available under `READ_ONLY=true`. New backend method `readAttachment` checks `ATTACHMENT_READ_MAX_BYTES` (default 25 MB) from the stored size before any chunk is fetched, and decrypts and joins LiveSync binary chunks in CouchDB mode.
+- **Save and embed in one call.** `create_attachment_upload` and `write_attachment` take `embed_in_note`, with `position` (`append`, `prepend` after frontmatter, or `after` the line containing `after_text`), an optional `caption` (an italic line under the image, searchable) and `width` (`![[path|400]]`). The note is checked before the file is stored. For uploads the embed happens when the `PUT` succeeds and the `201` response reports `embedded_in` or `embed_error`.
+
+### Dependencies
+- Add `sharp` 0.35 for image scaling. It ships prebuilt binaries for linux/amd64 and linux/arm64 and needs no install scripts, so the `npm ci --ignore-scripts` image build is unchanged. If it can't load, `read_attachment` passes `jpeg`/`png`/`gif`/`webp` through unscaled.
+
 ## 0.12.1
 
 ### Fixes

@@ -19,6 +19,7 @@ function fakeBackend(withRemote = false) {
         deleteAttachment: async (p) => { calls.push(`deleteAtt:${p}`); return true; },
         moveAttachment: async (f, t) => { calls.push(`moveAtt:${f}->${t}`); return true; },
         getAttachmentInfo: async (p) => { calls.push(`attInfo:${p}`); return null; },
+        readAttachment: async (p) => { calls.push(`readAtt:${p}`); return new Uint8Array([1]); },
     };
     if (withRemote) {
         backend.catchUp = async (since) => { calls.push(`catchUp:${since}`); return "42"; };
@@ -28,6 +29,13 @@ function fakeBackend(withRemote = false) {
 }
 
 describe("readOnlyVault", () => {
+    it("delegates readAttachment", async () => {
+        const { backend, calls } = fakeBackend();
+        const ro = readOnlyVault(backend);
+        assert.deepEqual(await ro.readAttachment("a.png"), new Uint8Array([1]));
+        assert.deepEqual(calls, ["readAtt:a.png"]);
+    });
+
     it("rejects attachment writes and delegates getAttachmentInfo", async () => {
         const { backend, calls } = fakeBackend();
         const ro = readOnlyVault(backend);
