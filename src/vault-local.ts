@@ -5,7 +5,7 @@ import { glob } from "fs/promises";
 import { parseFrontmatterAndLinks } from "./parse.js";
 import { validateNotePath, isValidNotePath } from "./note-path.js";
 import { validateAttachmentPath, isValidAttachmentPath } from "./attachment-path.js";
-import { AttachmentExistsError, AttachmentMoveIncompleteError, type VaultBackend, type NoteInfo, type NoteListing, type AttachmentInfo, type WriteOptions, type MoveOptions } from "./vault-backend.js";
+import { AttachmentExistsError, AttachmentMoveIncompleteError, AttachmentTooLargeError, type VaultBackend, type ReadAttachmentOptions, type NoteInfo, type NoteListing, type AttachmentInfo, type WriteOptions, type MoveOptions } from "./vault-backend.js";
 
 // Not defined on Windows, which has no symlinks a non-admin can create anyway.
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -308,6 +308,27 @@ export class LocalVault implements VaultBackend {
             return true;
         } catch {
             throw new AttachmentMoveIncompleteError(from, to);
+        }
+    }
+
+    async readAttachment(path: string, { maxBytes }: ReadAttachmentOptions = {}): Promise<Uint8Array | null> {
+        const fullPath = await this.safePath(path, "attachment");
+        let size: number;
+        try {
+            const s = await stat(fullPath);
+            if (!s.isFile()) return null;
+            size = s.size;
+        } catch {
+            return null;
+        }
+        if (maxBytes !== undefined && size > maxBytes) throw new AttachmentTooLargeError(path, size, maxBytes, "reading");
+        try {
+            const data = new Uint8Array(await readFile(fullPath));
+            if (maxBytes !== undefined && data.byteLength > maxBytes) throw new AttachmentTooLargeError(path, data.byteLength, maxBytes, "reading");
+            return data;
+        } catch (e) {
+            if (e instanceof AttachmentTooLargeError) throw e;
+            return null;
         }
     }
 

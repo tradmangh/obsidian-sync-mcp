@@ -14,7 +14,7 @@ import { PouchDB } from "../lib/livesync-commonlib/src/pouchdb/pouchdb-http.ts";
 import { inspectDatabasePathIdentity, type PathIdentityInspection } from "../lib/livesync-commonlib/src/pouchdb/pathIdentityCompatibility.ts";
 import type { EntryDoc } from "../lib/livesync-commonlib/src/common/types.ts";
 import { parseFrontmatterAndLinks } from "./parse.js";
-import { AttachmentExistsError, AttachmentMoveIncompleteError, AttachmentTooLargeError, type MoveOptions, type VaultBackend, type NoteInfo, type NoteListing, type AttachmentInfo, type AttachmentChangeCallback, type WriteOptions } from "./vault-backend.js";
+import { AttachmentExistsError, AttachmentMoveIncompleteError, AttachmentTooLargeError, type MoveOptions, type VaultBackend, type NoteInfo, type NoteListing, type AttachmentInfo, type AttachmentChangeCallback, type WriteOptions, type ReadAttachmentOptions } from "./vault-backend.js";
 import { KeyedLock } from "./keyed-lock.js";
 import { validateNotePath, isValidNotePath } from "./note-path.js";
 import { validateAttachmentPath, isValidAttachmentPath } from "./attachment-path.js";
@@ -549,6 +549,24 @@ export class Vault implements VaultBackend {
             if (!deleted) throw new AttachmentMoveIncompleteError(from, to);
             return true;
         });
+    }
+
+    async readAttachment(path: string, { maxBytes }: ReadAttachmentOptions = {}): Promise<Uint8Array | null> {
+        validateAttachmentPath(path);
+        // Size from metadata first, so an oversized file's chunks are never fetched.
+        const meta = await this.manipulator.get(path as FilePathWithPrefix, true);
+        if (!meta || meta.deleted) return null;
+        // Fails closed: a missing or non-numeric size doesn't let the file load.
+        if (maxBytes !== undefined && !(Number.isFinite(meta.size) && meta.size <= maxBytes)) {
+            throw new AttachmentTooLargeError(path, meta.size, maxBytes, "reading");
+        }
+        const entry = await this.manipulator.get(path as FilePathWithPrefix);
+        if (!entry || !("data" in entry)) return null;
+        const content = readContent(entry as LoadedEntry);
+        const bytes = typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content);
+        // The stored size can understate the file; check what was loaded too.
+        if (maxBytes !== undefined && bytes.byteLength > maxBytes) throw new AttachmentTooLargeError(path, bytes.byteLength, maxBytes, "reading");
+        return bytes;
     }
 
     async getAttachmentInfo(path: string): Promise<AttachmentInfo | null> {

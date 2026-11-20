@@ -35,10 +35,14 @@ export interface MoveOptions extends WriteOptions {
     maxBytes?: number;
 }
 
-/** A move would have to load a file larger than `MoveOptions.maxBytes`. */
+export interface ReadAttachmentOptions {
+    maxBytes?: number;
+}
+
+/** A move or read would have to load a file larger than the allowed maximum. */
 export class AttachmentTooLargeError extends Error {
-    constructor(readonly path: string, readonly size: number, readonly limit: number) {
-        super(`Attachment is ${size} bytes, over the ${limit}-byte limit for moving it: ${path}`);
+    constructor(readonly path: string, readonly size: number, readonly limit: number, action = "moving") {
+        super(`Attachment is ${size} bytes, over the ${limit}-byte limit for ${action} it: ${path}`);
         this.name = "AttachmentTooLargeError";
     }
 }
@@ -78,6 +82,12 @@ export interface VaultBackend {
     deleteAttachment(path: string): Promise<boolean>;
     moveAttachment(from: string, to: string, options?: MoveOptions): Promise<boolean>;
     getAttachmentInfo(path: string): Promise<AttachmentInfo | null>;
+    /**
+     * Load an attachment's bytes, or null when it doesn't exist. With maxBytes,
+     * throws AttachmentTooLargeError before loading a file whose stored size is
+     * over the limit (and again if what was loaded turns out larger).
+     */
+    readAttachment(path: string, options?: ReadAttachmentOptions): Promise<Uint8Array | null>;
     /** Every attachment in the vault. Local mode only; CouchDB mode learns them from the change feed. */
     listAttachments?(): Promise<AttachmentInfo[]>;
     /** `onAttachment` also reports attachment changes, from metadata only (no chunks are loaded). */

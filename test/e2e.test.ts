@@ -8,7 +8,7 @@ import { mkdtemp, rm, mkdir, writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawn, type ChildProcess } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { request as httpRequest } from "node:http";
 
 const PORT = 9877;
@@ -423,6 +423,38 @@ describe("E2E: attachments", () => {
         assert.ok(meta.includes("Embedded or linked in: Welcome.md"), meta);
     });
 
+    it("uploads a real image with embed_in_note, then read_attachment returns it as MCP image content", async () => {
+        const sharp = (await import("sharp")).default;
+        const photo = new Uint8Array(await sharp({ create: { width: 3000, height: 2000, channels: 3, background: { r: 0, g: 90, b: 160 } } }).jpeg().toBuffer());
+        await callTool("write_note", { path: "Talks/Conf.md", content: "# Conf\nSlides:\nend" });
+        // A real photo is bigger than this suite's 1000-byte limit, so write it straight to disk as Obsidian would.
+        mkdirSync(join(vaultDir, "Talks/img"), { recursive: true });
+        writeFileSync(join(vaultDir, "Talks/img/IMG_1.jpeg"), photo);
+
+        const tiny = await callTool("create_attachment_upload", {
+            path: "Talks/img/dot.png", embed_in_note: "Talks/Conf.md", position: "after", after_text: "Slides:", caption: "Agenda",
+        });
+        const url = tiny.match(/http:\/\/\S+\/attachments\/upload\/[A-Za-z0-9_-]+/)![0];
+        const resp = await fetch(url, { method: "PUT", body: png });
+        assert.equal(resp.status, 201);
+        assert.equal((await resp.json()).embedded_in, "Talks/Conf.md");
+        const note = await callTool("read_note", { path: "Talks/Conf.md" });
+        assert.ok(note.includes("Slides:\n\n![[Talks/img/dot.png]]\n*Agenda*\nend"), note);
+
+        // Fresh restart so the startup scan indexes the file written to disk, then read it by bare name.
+        await stopServer();
+        await startServer({ VAULT_PATH: vaultDir, VAULT_NAME: "TestVault", ATTACHMENTS_ENABLED: "true", BASE_URL: `http://localhost:${PORT}`, ATTACHMENT_MAX_BYTES: "1000" });
+        const res = await mcpCall("tools/call", { name: "read_attachment", arguments: { path: "IMG_1.jpeg" } });
+        const content = res?.result?.content ?? [];
+        const image = content.find((c: any) => c.type === "image");
+        assert.ok(image, JSON.stringify(res).slice(0, 500));
+        assert.equal(image.mimeType, "image/jpeg");
+        const meta = await sharp(Buffer.from(image.data, "base64")).metadata();
+        assert.equal(Math.max(meta.width!, meta.height!), 1568);
+        assert.ok(content.find((c: any) => c.type === "text").text.includes("Talks/img/IMG_1.jpeg"));
+        rmSync(join(vaultDir, "Talks"), { recursive: true, force: true });
+    });
+
     it("rejects an upload over ATTACHMENT_MAX_BYTES and writes nothing", async () => {
         const out = await callTool("create_attachment_upload", { path: "Attachments/big.pdf" });
         const url = out.match(/http:\/\/\S+\/attachments\/upload\/[A-Za-z0-9_-]+/)![0];
@@ -505,7 +537,7 @@ describe("E2E: attachments", () => {
         await startServer({ VAULT_PATH: vaultDir, VAULT_NAME: "TestVault", ATTACHMENTS_ENABLED: "true", READ_ONLY: "true" });
         const list = await mcpCall("tools/list", {});
         const tools: string[] = (list?.result?.tools ?? []).map((t: any) => t.name);
-        assert.deepEqual(tools.filter((t) => t.includes("attachment")).sort(), ["get_attachment_metadata", "list_attachments"]);
+        assert.deepEqual(tools.filter((t) => t.includes("attachment")).sort(), ["get_attachment_metadata", "list_attachments", "read_attachment"]);
         const resp = await fetch(`http://localhost:${PORT}/attachments/upload/anything`, { method: "PUT", body: png });
         assert.equal(resp.status, 404);
     });

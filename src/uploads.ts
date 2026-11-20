@@ -18,6 +18,7 @@
 import { randomBytes } from "crypto";
 import type { Hono } from "hono";
 import { AttachmentExistsError, type VaultBackend } from "./vault-backend.js";
+import type { EmbedRequest } from "./embed.js";
 
 export const UPLOAD_ROUTE_PREFIX = "/attachments/upload/";
 
@@ -29,6 +30,8 @@ export interface UploadHandle {
     expectedSize?: number;
     maxBytes: number;
     expiresAt: number;
+    /** Place the file in a note once it is written (create_attachment_upload's embed_in_note). */
+    embed?: EmbedRequest;
 }
 
 export interface UploadRegistryOptions {
@@ -56,7 +59,7 @@ export class UploadRegistry {
         return this.handles.size;
     }
 
-    create(spec: { path: string; overwrite: boolean; expectedSize?: number; maxBytes: number }): UploadHandle {
+    create(spec: { path: string; overwrite: boolean; expectedSize?: number; maxBytes: number; embed?: EmbedRequest }): UploadHandle {
         this.prune();
         // An upload still streaming its body holds memory too, so it counts
         // against the cap until the route releases it.
@@ -144,11 +147,13 @@ export interface UploadRouteOptions {
     vault: VaultBackend;
     /** Called after a successful write, e.g. for logging. */
     onWritten?: (path: string, size: number) => void;
+    /** Embeds the written file in a note, for uploads created with embed_in_note. */
+    onEmbed?: (path: string, embed: EmbedRequest) => Promise<{ ok: boolean; message: string }>;
     /** Called when the backend write throws. The client only gets a generic 500. */
     onError?: (path: string, err: unknown) => void;
 }
 
-export function mountAttachmentUpload(app: Hono, { registry, vault, onWritten, onError }: UploadRouteOptions): void {
+export function mountAttachmentUpload(app: Hono, { registry, vault, onWritten, onEmbed, onError }: UploadRouteOptions): void {
     const handler = async (c: any) => {
         const token = c.req.param("token") ?? "";
         const unknown = () => c.json({ error: "Unknown, used or expired upload URL. Call create_attachment_upload again." }, 404);
@@ -189,7 +194,19 @@ export function mountAttachmentUpload(app: Hono, { registry, vault, onWritten, o
                 return c.json({ error: `Failed to write attachment: ${handle.path}` }, 500);
             }
             onWritten?.(handle.path, data.byteLength);
-            return c.json({ path: handle.path, size: data.byteLength, embed: `![[${handle.path}]]` }, 201);
+            const body: Record<string, unknown> = { path: handle.path, size: data.byteLength, embed: `![[${handle.path}]]` };
+            if (handle.embed && onEmbed) {
+                // The file is stored either way; a failed embed is reported, not turned into an error status.
+                try {
+                    const placed = await onEmbed(handle.path, handle.embed);
+                    if (placed.ok) body.embedded_in = handle.embed.note;
+                    else body.embed_error = placed.message;
+                } catch (err) {
+                    onError?.(handle.embed.note, err);
+                    body.embed_error = `File saved, but editing ${handle.embed.note} failed.`;
+                }
+            }
+            return c.json(body, 201);
         } finally {
             registry.release();
         }

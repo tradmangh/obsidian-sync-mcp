@@ -305,6 +305,19 @@ step("Attachments: encrypted + obfuscated binary round-trip");
     assert.ok(back instanceof ArrayBuffer || ArrayBuffer.isView(back), "binary content");
     assert.ok(Buffer.from(back as ArrayBuffer).equals(Buffer.from(bytes)), "byte-exact round-trip");
 
+    // readAttachment (read_attachment's backend call) decrypts and joins the chunks byte-exact.
+    const viaRead = await reader.readAttachment(ATTACHMENT);
+    assert.ok(viaRead && Buffer.from(viaRead).equals(Buffer.from(bytes)), "readAttachment is byte-exact");
+    assert.equal(await reader.readAttachment("Attachments/missing.png"), null, "missing attachment reads as null");
+    // Over the limit: refused from metadata, before any chunk is fetched.
+    const loadedBefore: string[] = [];
+    const m = (reader as any).manipulator;
+    const origGet = m.getByMeta.bind(m);
+    m.getByMeta = (meta: any) => origGet(meta).then((d: any) => { loadedBefore.push(d.path); return d; });
+    await assert.rejects(reader.readAttachment(ATTACHMENT, { maxBytes: 1024 }), AttachmentTooLargeError);
+    m.getByMeta = origGet;
+    assert.ok(!loadedBefore.includes(ATTACHMENT), "oversized attachment chunks were not loaded");
+
     // The plaintext path never reaches CouchDB, and every chunk is encrypted.
     const ids = await rawAllDocIds("attachvault");
     assert.ok(!ids.some((id) => id.includes("shot.png")), "path is obfuscated in document ids");

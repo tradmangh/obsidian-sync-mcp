@@ -14,6 +14,7 @@ import { parseWriteFolders } from "./write-scope.js";
 import { parseAttachmentExtensions, isValidAttachmentPath } from "./attachment-path.js";
 import { registerAttachmentTools, ATTACHMENT_WRITE_TOOLS, formatBytes } from "./attachment-tools.js";
 import { UploadRegistry, mountAttachmentUpload } from "./uploads.js";
+import { embedInNote } from "./embed.js";
 import { redactCredentials, describeError, describeLogMessage } from "./redact.js";
 import { parsePathNormalization, type PathNormalizationSetting } from "./path-identity-config.js";
 
@@ -64,6 +65,7 @@ const ATTACHMENT_MAX_BYTES = parsePositiveInt("ATTACHMENT_MAX_BYTES", 20 * 1024 
 // Inline base64 costs ~1 output token per 2.5 bytes; 32 KB is already ~13k tokens.
 const ATTACHMENT_INLINE_MAX_BYTES = parsePositiveInt("ATTACHMENT_INLINE_MAX_BYTES", 32 * 1024);
 const ATTACHMENT_UPLOAD_TTL_SECONDS = parsePositiveInt("ATTACHMENT_UPLOAD_TTL_SECONDS", 600);
+const ATTACHMENT_READ_MAX_BYTES = parsePositiveInt("ATTACHMENT_READ_MAX_BYTES", 25 * 1024 * 1024);
 let ATTACHMENT_EXTENSIONS: Set<string>;
 try {
     ATTACHMENT_EXTENSIONS = parseAttachmentExtensions(process.env.ATTACHMENT_EXTENSIONS);
@@ -407,7 +409,7 @@ function startCouchDbWatcher() {
 
 // --- MCP Server ---
 const ATTACHMENT_INSTRUCTIONS = ATTACHMENTS_ENABLED
-    ? " Images, PDFs, audio and video can be stored as attachments: whenever you can make an HTTP request, use create_attachment_upload and PUT the file to the returned URL; write_attachment (base64) is a slow fallback for tiny files only. Then embed the file in a note with ![[path]]."
+    ? " Use read_attachment to look at an image embedded in a note (the bare name from ![[name]] works). Images, PDFs, audio and video can be stored as attachments: whenever you can make an HTTP request, use create_attachment_upload and PUT the file to the returned URL; write_attachment (base64) is a slow fallback for tiny files only. Pass embed_in_note to place the file in a note in the same call, or embed it yourself with ![[path]]."
     : "";
 const BASE_INSTRUCTIONS = "Access and manage an Obsidian vault. You can read, write, list, search, move, and delete markdown notes." + ATTACHMENT_INSTRUCTIONS + " Every tool response includes an Obsidian deep link. Always show this link to the user using the format [obsidian://open?vault=...&file=...](obsidian://open?vault=...&file=...) so it is both clickable and visible as a URL.";
 const serverOptions: ConstructorParameters<typeof FastMCP>[0] = {
@@ -489,6 +491,7 @@ if (ATTACHMENTS_ENABLED) {
         base64MaxBytes: ATTACHMENT_INLINE_MAX_BYTES,
         registry: uploadRegistry,
         baseUrl: BASE_URL,
+        readMaxBytes: ATTACHMENT_READ_MAX_BYTES,
     });
     if (!READ_ONLY) {
         // The route has no other auth: the single-use token in the URL is the credential.
@@ -499,6 +502,7 @@ if (ATTACHMENTS_ENABLED) {
                 searchIndex.updateAttachment(path, size, Date.now());
                 if (debugLogging) console.log(`[debug] attachment upload: ${path} (${size} bytes)`);
             },
+            onEmbed: (path, embed) => embedInNote(vault, searchIndex, VAULT_NAME, path, embed),
             onError: (path, err) => {
                 console.error(`Attachment upload failed${debugLogging ? ` (${path})` : ""}: ${describeError(err, debugLogging)}`);
             },
@@ -506,8 +510,8 @@ if (ATTACHMENTS_ENABLED) {
     }
     console.log(
         READ_ONLY
-            ? "Attachments enabled (read-only: get_attachment_metadata only)."
-            : `Attachments enabled: ${ATTACHMENT_WRITE_TOOLS.join(", ")}; uploads up to ${formatBytes(ATTACHMENT_MAX_BYTES)} via ${BASE_URL}/attachments/upload/<token>.`,
+            ? "Attachments enabled (read-only: read_attachment, get_attachment_metadata, list_attachments)."
+            : `Attachments enabled: read_attachment, ${ATTACHMENT_WRITE_TOOLS.join(", ")}; uploads up to ${formatBytes(ATTACHMENT_MAX_BYTES)} via ${BASE_URL}/attachments/upload/<token>.`,
     );
 }
 
